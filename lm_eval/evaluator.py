@@ -486,7 +486,6 @@ def simple_evaluate(
         cache_requests=cache_requests,
         rewrite_requests_cache=rewrite_requests_cache,
         bootstrap_iters=bootstrap_iters,
-        write_out=write_out,
         log_samples=True if predict_only else log_samples,
         log_samples_extra=log_samples_extra,
         system_instruction=system_instruction,
@@ -550,7 +549,6 @@ def evaluate(
     cache_requests: bool = False,
     rewrite_requests_cache: bool = False,
     bootstrap_iters: int | None = 100000,
-    write_out: bool = False,
     log_samples: bool = True,
     log_samples_extra: bool = False,
     system_instruction: str | None = None,
@@ -577,8 +575,6 @@ def evaluate(
         bootstrap_iters (int | None): Number of iterations for bootstrap
             statistics, used when calculating stderr. Set to 0 for skipping all
             stderr calculations.
-        write_out (bool): If True, write out an example document and model input
-            for checking task integrity.
         log_samples (bool): If True, write out all model outputs and documents
             for per-sample measurement and post-hoc analysis.
         system_instruction (str | None): System instruction to be applied to the
@@ -670,8 +666,6 @@ def evaluate(
         eval_logger.debug(
             f"Task: {task_output.task_name}; number of requests on this rank: {len(task.instances)}"
         )
-        if write_out:
-            print_writeout(task)
         # aggregate Instances by LM method requested to get output.
         for instance in task.instances:
             reqtype = instance.request_type
@@ -752,47 +746,6 @@ def evaluate(
             for doc_id, doc in doc_iterator:
                 doc_id_true = indices[doc_id] if indices else doc_id
                 requests = instances_by_doc_id[doc_id]
-                
-                # Print prompt and response if write_out is enabled (only for first doc)
-                if write_out and doc_id < 1:
-                    prompt = requests[0].args[0] if requests and requests[0].args else "N/A"
-                    target = task.doc_to_target(doc)
-                    
-                    # Try to get response from filtered_resps first, then fall back to resps
-                    generated = None
-                    if requests and hasattr(requests[0], "filtered_resps") and requests[0].filtered_resps:
-                        generated = requests[0].filtered_resps.get(filter_key, None)
-                    elif requests and hasattr(requests[0], "resps") and requests[0].resps:
-                        generated = requests[0].resps[0] if requests[0].resps else None
-                    
-                    if isinstance(generated, list) and generated:
-                        generated = generated[0]
-                    if generated is None:
-                        generated = "N/A (response not available yet)"
-                    
-                    # Split CoT and response
-                    cot, response = _split_cot_and_response(generated if isinstance(generated, str) else str(generated))
-                    
-                    eval_logger.info("=" * 80)
-                    eval_logger.info(f"Task: {task_output.task_name}; Document {doc_id_true}")
-                    eval_logger.info("-" * 80)
-                    eval_logger.info("PROMPT:")
-                    eval_logger.info(prompt)
-                    eval_logger.info("-" * 80)
-                    eval_logger.info("TARGET (expected answer):")
-                    eval_logger.info(target)
-                    eval_logger.info("-" * 80)
-                    if cot:
-                        eval_logger.info("CHAIN OF THOUGHT (CoT):")
-                        eval_logger.info(cot)
-                        eval_logger.info("-" * 80)
-                    eval_logger.info("MODEL RESPONSE:")
-                    eval_logger.info(response)
-                    if not cot:
-                        eval_logger.info("-" * 80)
-                        eval_logger.info("(Full generation - CoT not separated):")
-                        eval_logger.info(generated if isinstance(generated, str) else str(generated))
-                    eval_logger.info("=" * 80)
                 
                 metrics = task.process_results(
                     doc, [req.filtered_resps[filter_key] for req in requests]
