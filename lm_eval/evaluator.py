@@ -61,26 +61,15 @@ _COT_CLOSING_TAG_RE = re.compile(
 
 def _tok_len(lm: "LM", text: str | None) -> int | None:
     """Best-effort token count using the LM tokenizer (if available)."""
-    if not isinstance(text, str):
+    if not isinstance(text, str) or not text:
         return None
-    tok_encode = getattr(lm, "tok_encode", None)
-    if tok_encode is None:
-        return None
-    try:
-        enc = tok_encode(text)
-    except Exception:
-        return None
-
-    # Common case: list[int]
-    if isinstance(enc, list):
-        if len(enc) == 0:
-            return 0
-        if isinstance(enc[0], int):
-            return len(enc)
-        # Some backends may return list[list[int]] for batched inputs.
-        if isinstance(enc[0], list) and enc and isinstance(enc[0][0], int):
-            # For a single string input we expect a single encoding.
-            return len(enc[0])
+    
+    tokenizer = getattr(lm, "tokenizer", None)
+    if tokenizer is not None:
+        if hasattr(tokenizer, "encode"):
+            enc = tokenizer.encode(text, add_special_tokens=False)
+            if isinstance(enc, list):
+                return len(enc)
     return None
 
 

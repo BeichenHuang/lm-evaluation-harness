@@ -8,7 +8,7 @@ training_split: train
 fewshot_split: train
 test_split: train
 process_docs: !function utils.process_docs_test
-doc_to_text: "Please reason step by step, and put your final answer within \\\\boxed{}.\n\nProblem:\n{{problem}}\n\nAnswer:"
+doc_to_text: "Please reason step by step, and put your final answer within \\boxed{}.\n\n{{problem}}"
 doc_to_target: "{{answer}}"
 process_results: !function utils.process_results
 metric_list:
