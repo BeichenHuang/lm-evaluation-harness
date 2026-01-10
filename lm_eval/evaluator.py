@@ -25,7 +25,6 @@ from lm_eval.evaluator_utils import (
     get_task_list,
     prepare_print_tasks,
     print_writeout,
-    print_writeout_with_responses,
     run_task_tests,
 )
 from lm_eval.loggers.utils import add_env_info, add_tokenizer_info, get_git_commit_hash
