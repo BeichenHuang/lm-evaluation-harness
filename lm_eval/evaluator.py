@@ -84,27 +84,6 @@ def _tok_len(lm: "LM", text: str | None) -> int | None:
     return None
 
 
-def _find_last_boxed_expr(text: str) -> str | None:
-    """Returns the last '\\boxed{...}' substring (including braces) if present."""
-    idx = text.rfind("\\boxed")
-    if idx < 0:
-        return None
-
-    brace_start = text.find("{", idx)
-    if brace_start < 0:
-        return None
-
-    depth = 0
-    for i in range(brace_start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[idx : i + 1]
-    return None
-
-
 def _split_cot_and_response(generated: str) -> tuple[str, str]:
     """
     Split a generation into (cot, response) best-effort.
@@ -803,19 +782,20 @@ def evaluate(
                             generated0 = generated if isinstance(generated, str) else str(generated or "")
 
                         cot, response = _split_cot_and_response(generated0)
+                        cot_steps = [
+                            ln.strip()
+                            for ln in cot.splitlines()
+                            if ln.strip()
+                        ]
                         example.update(
                             {
                                 "prompt": prompt,
                                 "generation": generated0,
                                 "correct": _infer_correct(metrics),
                                 "cot": cot,
-                                "cot_steps": [
-                                    ln.strip()
-                                    for ln in cot.splitlines()
-                                    if ln.strip()
-                                ],
-                                "cot_tokens": _tok_len(lm, cot),
                                 "response": response,
+                                "cot_tokens": _tok_len(lm, cot),
+                                "cot_steps_num": len(cot_steps),
                                 "response_tokens": _tok_len(lm, response),
                             }
                         )
