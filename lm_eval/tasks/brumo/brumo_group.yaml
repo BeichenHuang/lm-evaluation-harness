@@ -1,0 +1,6 @@
+group: brumo
+group_alias: BRUMO
+task:
+  - brumo_2025
+
+
