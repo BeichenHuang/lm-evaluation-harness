@@ -209,6 +209,43 @@ def print_writeout(task) -> None:
             eval_logger.info(f"Request: {str(inst)}")
 
 
+def print_writeout_with_responses(task) -> None:
+    """Print prompt and model responses for the first few documents."""
+    for inst in task.instances:
+        if inst.doc_id < 1:
+            prompt = inst.args[0] if inst.args else "N/A"
+            target = task.doc_to_target(inst.doc)
+            
+            # Get the first response (from filtered_resps if available, else resps)
+            response = None
+            if hasattr(inst, "filtered_resps") and inst.filtered_resps:
+                # Get the first filter's response
+                first_filter = next(iter(inst.filtered_resps.values()), None)
+                if isinstance(first_filter, list) and first_filter:
+                    response = first_filter[0]
+                elif first_filter:
+                    response = first_filter
+            elif hasattr(inst, "resps") and inst.resps:
+                if isinstance(inst.resps[0], list) and inst.resps[0]:
+                    response = inst.resps[0][0]
+                else:
+                    response = inst.resps[0] if inst.resps else None
+            
+            eval_logger.info("=" * 80)
+            eval_logger.info(f"Task: {task.config.task if hasattr(task, 'config') else task}; Document {inst.doc_id}")
+            eval_logger.info("-" * 80)
+            eval_logger.info("PROMPT:")
+            eval_logger.info(prompt)
+            eval_logger.info("-" * 80)
+            eval_logger.info("TARGET (expected answer):")
+            eval_logger.info(target)
+            if response is not None:
+                eval_logger.info("-" * 80)
+                eval_logger.info("MODEL RESPONSE:")
+                eval_logger.info(response)
+            eval_logger.info("=" * 80)
+
+
 def get_sample_size(task, limit: int | None) -> int | None:
     if limit is not None:
         limit = (

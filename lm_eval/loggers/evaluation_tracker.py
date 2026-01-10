@@ -367,6 +367,7 @@ class EvaluationTracker:
                         sample_dump = (
                             json.dumps(
                                 sample,
+                                indent=2,
                                 default=handle_non_serializable,
                                 ensure_ascii=False,
                             )

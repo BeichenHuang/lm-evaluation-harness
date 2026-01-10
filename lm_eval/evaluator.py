@@ -25,6 +25,7 @@ from lm_eval.evaluator_utils import (
     get_task_list,
     prepare_print_tasks,
     print_writeout,
+    print_writeout_with_responses,
     run_task_tests,
 )
 from lm_eval.loggers.utils import add_env_info, add_tokenizer_info, get_git_commit_hash
@@ -50,8 +51,12 @@ eval_logger = logging.getLogger(__name__)
 
 
 _COT_TAG_RE = re.compile(
-    r"<\s*(think|analysis|reasoning)\s*>(.*?)<\s*/\s*\1\s*>",
+    r"<\s*(think|analysis|reasoning|redacted_reasoning|thought)\s*>(.*?)<\s*/\s*\1\s*>",
     flags=re.IGNORECASE | re.DOTALL,
+)
+_COT_CLOSING_TAG_RE = re.compile(
+    r"<\s*/\s*(think|analysis|reasoning|redacted_reasoning|thought)\s*>",
+    flags=re.IGNORECASE,
 )
 
 
@@ -105,24 +110,40 @@ def _split_cot_and_response(generated: str) -> tuple[str, str]:
     """
     Split a generation into (cot, response) best-effort.
 
-    - If <think>/<analysis>/<reasoning> tags are present: cot=inside, response=outside.
-    - Else if a \\boxed{...} is present: response=last boxed expr, cot=everything else.
+    - If <think>/<analysis>/<reasoning>/<think>/<thought> tags are present: cot=inside, response=outside.
+    - Else if only closing tag (e.g., </think>) exists without opening tag: cot=from start to closing tag, response=after closing tag.
     - Else: cot="", response=full string.
     """
     if not generated:
         return "", ""
 
+    # First, try to find a complete tag pair (opening + closing)
     m = _COT_TAG_RE.search(generated)
     if m:
         cot = (m.group(2) or "").strip()
         response = (generated[: m.start()] + generated[m.end() :]).strip()
         return cot, response
 
-    boxed = _find_last_boxed_expr(generated)
-    if boxed:
-        response = boxed.strip()
-        cot = generated.replace(boxed, " ").strip()
-        return cot, response
+    # Handle case where only closing tag exists (like matharena does)
+    # Check for closing tags without matching opening tags
+    # Use finditer to find all closing tags, then check for matching opening tags
+    closing_matches = list(_COT_CLOSING_TAG_RE.finditer(generated))
+    if closing_matches:
+        # Check the rightmost closing tag (like matharena uses rfind)
+        closing_match = closing_matches[-1]
+        tag_name = closing_match.group(1).lower()  # Get tag name from match
+        
+        # Check if there's a matching opening tag (case-insensitive)
+        opening_pattern = re.compile(rf"<\s*{re.escape(tag_name)}\s*>", flags=re.IGNORECASE)
+        opening_match = opening_pattern.search(generated)
+        
+        if opening_match is None:
+            # Some traces have only the end tag - extract from start to end tag (like matharena)
+            # This matches matharena's behavior: cot_start = 0 when opening tag not found
+            cot_end = closing_match.end()
+            cot = generated[:cot_end].strip()
+            response = generated[cot_end:].strip()
+            return cot, response
 
     return "", generated.strip()
 
@@ -731,6 +752,48 @@ def evaluate(
             for doc_id, doc in doc_iterator:
                 doc_id_true = indices[doc_id] if indices else doc_id
                 requests = instances_by_doc_id[doc_id]
+                
+                # Print prompt and response if write_out is enabled (only for first doc)
+                if write_out and doc_id < 1:
+                    prompt = requests[0].args[0] if requests and requests[0].args else "N/A"
+                    target = task.doc_to_target(doc)
+                    
+                    # Try to get response from filtered_resps first, then fall back to resps
+                    generated = None
+                    if requests and hasattr(requests[0], "filtered_resps") and requests[0].filtered_resps:
+                        generated = requests[0].filtered_resps.get(filter_key, None)
+                    elif requests and hasattr(requests[0], "resps") and requests[0].resps:
+                        generated = requests[0].resps[0] if requests[0].resps else None
+                    
+                    if isinstance(generated, list) and generated:
+                        generated = generated[0]
+                    if generated is None:
+                        generated = "N/A (response not available yet)"
+                    
+                    # Split CoT and response
+                    cot, response = _split_cot_and_response(generated if isinstance(generated, str) else str(generated))
+                    
+                    eval_logger.info("=" * 80)
+                    eval_logger.info(f"Task: {task_output.task_name}; Document {doc_id_true}")
+                    eval_logger.info("-" * 80)
+                    eval_logger.info("PROMPT:")
+                    eval_logger.info(prompt)
+                    eval_logger.info("-" * 80)
+                    eval_logger.info("TARGET (expected answer):")
+                    eval_logger.info(target)
+                    eval_logger.info("-" * 80)
+                    if cot:
+                        eval_logger.info("CHAIN OF THOUGHT (CoT):")
+                        eval_logger.info(cot)
+                        eval_logger.info("-" * 80)
+                    eval_logger.info("MODEL RESPONSE:")
+                    eval_logger.info(response)
+                    if not cot:
+                        eval_logger.info("-" * 80)
+                        eval_logger.info("(Full generation - CoT not separated):")
+                        eval_logger.info(generated if isinstance(generated, str) else str(generated))
+                    eval_logger.info("=" * 80)
+                
                 metrics = task.process_results(
                     doc, [req.filtered_resps[filter_key] for req in requests]
                 )
