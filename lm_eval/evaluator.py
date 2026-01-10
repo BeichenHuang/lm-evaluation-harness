@@ -485,6 +485,7 @@ def simple_evaluate(
         cache_requests=cache_requests,
         rewrite_requests_cache=rewrite_requests_cache,
         bootstrap_iters=bootstrap_iters,
+        write_out=write_out,
         log_samples=True if predict_only else log_samples,
         log_samples_extra=log_samples_extra,
         system_instruction=system_instruction,
@@ -548,6 +549,7 @@ def evaluate(
     cache_requests: bool = False,
     rewrite_requests_cache: bool = False,
     bootstrap_iters: int | None = 100000,
+    write_out: bool = False,
     log_samples: bool = True,
     log_samples_extra: bool = False,
     system_instruction: str | None = None,
@@ -574,6 +576,8 @@ def evaluate(
         bootstrap_iters (int | None): Number of iterations for bootstrap
             statistics, used when calculating stderr. Set to 0 for skipping all
             stderr calculations.
+        write_out (bool): If True, write out an example document and model input
+            for checking task integrity.
         log_samples (bool): If True, write out all model outputs and documents
             for per-sample measurement and post-hoc analysis.
         system_instruction (str | None): System instruction to be applied to the
@@ -665,6 +669,8 @@ def evaluate(
         eval_logger.debug(
             f"Task: {task_output.task_name}; number of requests on this rank: {len(task.instances)}"
         )
+        if write_out:
+            print_writeout(task)
         # aggregate Instances by LM method requested to get output.
         for instance in task.instances:
             reqtype = instance.request_type
