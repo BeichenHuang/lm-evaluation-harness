@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -48,6 +49,99 @@ if TYPE_CHECKING:
 eval_logger = logging.getLogger(__name__)
 
 
+_COT_TAG_RE = re.compile(
+    r"<\s*(think|analysis|reasoning)\s*>(.*?)<\s*/\s*\1\s*>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+
+def _tok_len(lm: "LM", text: str | None) -> int | None:
+    """Best-effort token count using the LM tokenizer (if available)."""
+    if not isinstance(text, str):
+        return None
+    tok_encode = getattr(lm, "tok_encode", None)
+    if tok_encode is None:
+        return None
+    try:
+        enc = tok_encode(text)
+    except Exception:
+        return None
+
+    # Common case: list[int]
+    if isinstance(enc, list):
+        if len(enc) == 0:
+            return 0
+        if isinstance(enc[0], int):
+            return len(enc)
+        # Some backends may return list[list[int]] for batched inputs.
+        if isinstance(enc[0], list) and enc and isinstance(enc[0][0], int):
+            # For a single string input we expect a single encoding.
+            return len(enc[0])
+    return None
+
+
+def _find_last_boxed_expr(text: str) -> str | None:
+    """Returns the last '\\boxed{...}' substring (including braces) if present."""
+    idx = text.rfind("\\boxed")
+    if idx < 0:
+        return None
+
+    brace_start = text.find("{", idx)
+    if brace_start < 0:
+        return None
+
+    depth = 0
+    for i in range(brace_start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[idx : i + 1]
+    return None
+
+
+def _split_cot_and_response(generated: str) -> tuple[str, str]:
+    """
+    Split a generation into (cot, response) best-effort.
+
+    - If <think>/<analysis>/<reasoning> tags are present: cot=inside, response=outside.
+    - Else if a \\boxed{...} is present: response=last boxed expr, cot=everything else.
+    - Else: cot="", response=full string.
+    """
+    if not generated:
+        return "", ""
+
+    m = _COT_TAG_RE.search(generated)
+    if m:
+        cot = (m.group(2) or "").strip()
+        response = (generated[: m.start()] + generated[m.end() :]).strip()
+        return cot, response
+
+    boxed = _find_last_boxed_expr(generated)
+    if boxed:
+        response = boxed.strip()
+        cot = generated.replace(boxed, " ").strip()
+        return cot, response
+
+    return "", generated.strip()
+
+
+def _infer_correct(metrics: dict) -> bool | None:
+    """Infer a boolean correctness from common per-sample metric keys."""
+    for k in ("exact_match", "acc", "accuracy"):
+        if k not in metrics:
+            continue
+        v = metrics[k]
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            return v == 1
+        if isinstance(v, float):
+            return v == 1.0
+    return None
+
+
 @positional_deprecated
 def simple_evaluate(
     model: str | LM,
@@ -67,6 +161,7 @@ def simple_evaluate(
     check_integrity: bool = False,
     write_out: bool = False,
     log_samples: bool = True,
+    log_samples_extra: bool = False,
     evaluation_tracker: EvaluationTracker | None = None,
     system_instruction: str | None = None,
     apply_chat_template: bool | str = False,
@@ -372,6 +467,7 @@ def simple_evaluate(
         bootstrap_iters=bootstrap_iters,
         write_out=write_out,
         log_samples=True if predict_only else log_samples,
+        log_samples_extra=log_samples_extra,
         system_instruction=system_instruction,
         apply_chat_template=apply_chat_template,
         fewshot_as_multiturn=fewshot_as_multiturn,
@@ -435,6 +531,7 @@ def evaluate(
     bootstrap_iters: int | None = 100000,
     write_out: bool = False,
     log_samples: bool = True,
+    log_samples_extra: bool = False,
     system_instruction: str | None = None,
     apply_chat_template: bool | str = False,
     fewshot_as_multiturn: bool = False,
@@ -658,9 +755,49 @@ def evaluate(
                                 ensure_ascii=False,
                             )
                         ),
-                        "prompt_hash": hash_string(requests[0].arguments[0]),
+                        "prompt_hash": hash_string(str(requests[0].arguments[0])),
                         "target_hash": hash_string(str(target)),
                     }
+                    if log_samples_extra:
+                        prompt = None
+                        try:
+                            prompt = requests[0].args[0]
+                        except Exception:
+                            prompt = None
+
+                        generated = None
+                        try:
+                            generated = requests[0].filtered_resps[filter_key]
+                        except Exception:
+                            generated = None
+
+                        # If a filter returns a list (e.g., repeats), take the first element for convenience logging.
+                        if isinstance(generated, list):
+                            generated0 = (
+                                generated[0]
+                                if generated and isinstance(generated[0], str)
+                                else str(generated)
+                            )
+                        else:
+                            generated0 = generated if isinstance(generated, str) else str(generated or "")
+
+                        cot, response = _split_cot_and_response(generated0)
+                        example.update(
+                            {
+                                "prompt": prompt,
+                                "generation": generated0,
+                                "correct": _infer_correct(metrics),
+                                "cot": cot,
+                                "cot_steps": [
+                                    ln.strip()
+                                    for ln in cot.splitlines()
+                                    if ln.strip()
+                                ],
+                                "cot_tokens": _tok_len(lm, cot),
+                                "response": response,
+                                "response_tokens": _tok_len(lm, response),
+                            }
+                        )
                     example.update(metrics)
                     task_output.logged_samples.append(example)
                 for metric, value in metrics.items():

@@ -183,6 +183,12 @@ class Run(SubCommand):
             help="Save all model outputs and documents for post-hoc analysis",
         )
         data_group.add_argument(
+            "--log_samples_extra",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="When saving samples, also write convenience fields (prompt/generation, CoT split, token counts).",
+        )
+        data_group.add_argument(
             "--samples",
             "-E",
             default=None,
@@ -397,6 +403,7 @@ class Run(SubCommand):
             check_integrity=cfg.check_integrity,
             write_out=cfg.write_out,
             log_samples=cfg.log_samples,
+            log_samples_extra=cfg.log_samples_extra,
             evaluation_tracker=evaluation_tracker,
             system_instruction=cfg.system_instruction,
             apply_chat_template=cfg.apply_chat_template,

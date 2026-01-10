@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -372,6 +373,21 @@ class EvaluationTracker:
                             + "\n"
                         )
                         f.write(sample_dump)
+
+                # Also create a stable per-task filename pointing at the most recent run output.
+                # This makes it easy to consume as: <output_path>/<model>/<task>.jsonl
+                stable_task_path = path / f"{sanitize_task_name(task_name)}.jsonl"
+                try:
+                    if stable_task_path.exists() or stable_task_path.is_symlink():
+                        stable_task_path.unlink()
+                    # Use a relative symlink (robust to moving the whole directory).
+                    stable_task_path.symlink_to(file_results_samples.name)
+                except Exception:
+                    # Symlinks may be unsupported; fall back to copying.
+                    try:
+                        shutil.copyfile(file_results_samples, stable_task_path)
+                    except Exception:
+                        pass
 
                 if self.api and self.push_samples_to_hub:
                     from huggingface_hub.utils import (

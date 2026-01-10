@@ -112,6 +112,12 @@ class EvaluatorConfig:
     log_samples: bool = field(
         default=False, metadata={"help": "Save model outputs and inputs"}
     )
+    log_samples_extra: bool = field(
+        default=False,
+        metadata={
+            "help": "Add extra per-sample fields (prompt/generation, CoT split, token counts) when saving samples."
+        },
+    )
     output_path: str | None = field(
         default=None, metadata={"help": "Dir path where result metrics will be saved"}
     )
@@ -285,6 +291,10 @@ class EvaluatorConfig:
 
         # predict_only implies log_samples
         if self.predict_only:
+            self.log_samples = True
+
+        # log_samples_extra implies log_samples
+        if self.log_samples_extra:
             self.log_samples = True
 
         # log_samples or predict_only requires output_path
