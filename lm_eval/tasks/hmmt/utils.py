@@ -28,6 +28,11 @@ def process_docs_test(dataset: datasets.Dataset) -> datasets.Dataset:
     return dataset.select([1]) if len(dataset) > 0 else dataset
 
 
+def process_docs_test_large(dataset: datasets.Dataset) -> datasets.Dataset:
+    # For HMMT_test_large: keep the first 5 samples
+    return dataset.select(list(range(min(5, len(dataset))))) if len(dataset) > 0 else dataset
+
+
 def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
     raw = results[0] if results else ""
     gold = str(doc.get("answer", ""))
