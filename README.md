@@ -1,5 +1,7 @@
 # Language Model Evaluation Harness
 
+Beichen: Update AIME,HMMT,BRUMO,Math500,GSM8K-thinking
+
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10256836.svg)](https://doi.org/10.5281/zenodo.10256836)
 
 ---
