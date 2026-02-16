@@ -6,6 +6,44 @@ from lm_eval.api.filter import Filter
 from lm_eval.api.registry import register_filter
 
 
+def _last_boxed_content(string: str) -> str | None:
+    """Extract content from the last \\boxed{...} in a string, handling nested braces."""
+    idx = string.rfind("\\boxed")
+    if idx < 0:
+        return None
+    # find the opening brace
+    i = idx + len("\\boxed")
+    if i >= len(string) or string[i] != "{":
+        return None
+    # match braces
+    depth = 0
+    start = i
+    while i < len(string):
+        if string[i] == "{":
+            depth += 1
+        elif string[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return string[start + 1 : i]
+        i += 1
+    return None
+
+
+def _clean_latex_number(s: str) -> str:
+    """Clean LaTeX-formatted number: remove {,} separators, $, spaces, \\text{}, etc."""
+    s = s.replace("{,}", "")
+    s = s.replace("\\,", "")
+    s = re.sub(r"\\text\{[^}]*\}", "", s)
+    s = s.replace(",", "")
+    s = s.replace(" ", "")
+    s = s.replace("$", "")
+    s = s.replace("\\$", "")
+    s = s.replace("%", "")
+    s = s.replace("\\%", "")
+    s = s.rstrip(".")
+    return s.strip()
+
+
 @register_filter("regex")
 class RegexFilter(Filter):
     """A filter that extracts values from text using regex pattern matching.
@@ -235,3 +273,57 @@ class MultiChoiceRegexFilter(RegexFilter):
             filtered_resps.append(filtered)
 
         return filtered_resps
+
+
+@register_filter("thinking_model_extract")
+class ThinkingModelExtractFilter(Filter):
+    """A filter for thinking models (e.g., Qwen3-Thinking) that produce
+    <think>...</think> blocks and may output answers in \\boxed{} or #### format.
+
+    Extraction priority:
+      1. \\boxed{NUMBER} (with LaTeX cleanup)
+      2. #### NUMBER
+      3. Last number in the text (flexible fallback)
+    """
+
+    def __init__(
+        self,
+        strip_think: bool = True,
+        fallback: str = "[invalid]",
+    ) -> None:
+        self.strip_think = strip_think
+        self.fallback = fallback
+
+    def apply(self, resps: list[list[str]], docs: list[dict]) -> list[list[str]]:
+        def extract_answer(resp: str) -> str:
+            if not isinstance(resp, str) or not resp:
+                return self.fallback
+
+            text = resp
+            # Strip <think>...</think> content so we only look at the final answer
+            if self.strip_think and "</think>" in text:
+                text = text.split("</think>")[-1]
+
+            # 1) Try \\boxed{...}
+            boxed = _last_boxed_content(text)
+            if boxed is not None:
+                cleaned = _clean_latex_number(boxed)
+                if cleaned:
+                    return cleaned
+
+            # 2) Try #### NUMBER
+            m = re.search(r"####\s*(\-?[0-9\.\,]+)", text)
+            if m:
+                return m.group(1).replace(",", "").strip()
+
+            # 3) Fallback: last bare number in text
+            nums = re.findall(r"-?\d[\d,]*\.?\d*", text)
+            if nums:
+                return nums[-1].replace(",", "")
+
+            return self.fallback
+
+        def filter_set(inst: list[str]) -> list[str]:
+            return [extract_answer(r) for r in inst]
+
+        return [filter_set(r) for r in resps]
