@@ -753,6 +753,19 @@ def evaluate(
                         except Exception:
                             prompt = None
 
+                        # Use raw resps (before filters) for CoT analysis so that
+                        # thinking content is preserved even when filters strip it.
+                        raw_generated = None
+                        try:
+                            raw_resp = requests[0].resps[0]
+                            if isinstance(raw_resp, list) and raw_resp:
+                                raw_generated = raw_resp[0] if isinstance(raw_resp[0], str) else str(raw_resp[0])
+                            elif isinstance(raw_resp, str):
+                                raw_generated = raw_resp
+                        except Exception:
+                            raw_generated = None
+
+                        # Also get filtered response for the generation field
                         generated = None
                         try:
                             generated = requests[0].filtered_resps[filter_key]
@@ -769,7 +782,9 @@ def evaluate(
                         else:
                             generated0 = generated if isinstance(generated, str) else str(generated or "")
 
-                        cot, response = _split_cot_and_response(generated0)
+                        # Use raw response for CoT splitting (it still has <think>...</think> tags)
+                        cot_source = raw_generated if raw_generated else generated0
+                        cot, response = _split_cot_and_response(cot_source)
                         cot_steps = [
                             ln.strip()
                             for ln in cot.splitlines()
@@ -778,7 +793,7 @@ def evaluate(
                         example.update(
                             {
                                 "prompt": prompt,
-                                "generation": generated0,
+                                "generation": raw_generated if raw_generated else generated0,
                                 "correct": _infer_correct(metrics),
                                 "cot": cot,
                                 "response": response,
